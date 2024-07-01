@@ -1,47 +1,158 @@
 import subprocess
+import numpy as np
+import pandas as pd
+from pandas import DataFrame
 from tqdm import tqdm
 from collections import defaultdict
 import os
 import sys
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-sys.path.append(r'/home/rlfowler/Documents/research/tfo_inverse_modelling')
-from ..models.models import MLP
+sys.path.append(r'/home/rlfowler/Documents/research/TFO-Inverse-Modeling')
+from model import MLP
 import torch.nn as nn
 import torch
-from ..models.utils import set_seed
+import itertools
+from sklearn import preprocessing
+from model import set_seed, data_filter1, validation1, total_counter, DataLoaderGenerator
+
+
+# Iterator skips for the sweep
+SKIP_TO = 0
+SKIP_LIST = []
+
 
 # List of data paramters to sweep over
 data_params = defaultdict(list)
 data_params['output_labels'] = [[*range(7)]] # Column indices of the output labels   (none for all columns)
 data_params['input_labels'] = [None]         # Column indices of the input labels    (none for all columns)  
-data_params['random_seed'] = [42]             # Random seed for the model
-data_params['batch_size'] = [32, 512]                  # Batch size for training
+data_params['random_seed'] = [42]            # Random seed for the model (not implemented currently)
+data_params['log_transform'] = [True]        # Log transform the data
+data_params['batch_size'] = [32, 512]           # Batch size for training
+data_params['filter_method'] = [data_filter1]       # Method for filtering data
+data_params['validation_method'] = [validation1]    # Method for splitting data into training and validation sets
+
 
 # List of training parameters to sweep over
 train_params = defaultdict(list)
-train_params['num_epochs'] = [25]                  # Number of epochs for training
+train_params['num_epochs'] = [25]             # Number of epochs for training
 train_params['learning_rate'] = [5e-4]        # Learning rate for the model
 train_params['weight_decay'] = [0]            # Weight decay for the optimizer
 
+
 # List of model parameters to sweep over
 model_params = defaultdict(list)
-model_params['model'] = [MLP]
+model_params['model'] = [MLP]       # Model class to use
 model_params['hidden_layers'] = [   # Hidden layer sizes for the linear layers (not including input and output layers)
     [40, 30, 20, 10],
     ]
-model_params['activation'] = [   # Activation function for the hidden layers
+model_params['activation'] = [      # Activation function for the hidden layers
     [nn.ReLU()],
     ]
-model_params['dropout'] = [   # Dropout rate for the hidden layers
+model_params['dropout'] = [         # Dropout rate for the hidden layers
     [0],
     ]
-model_params['batch_norm'] = [True]   # Batch normalization for the hidden layers
+model_params['batch_norm'] = [True] # Batch normalization for the hidden layers
+
 
 # Constants in Sweep
-LABEL_START_INDEX = 7   # All columns before this index are considered output features
-DATA_LOADER_PARAMS = None # Default set if none
-
+DATA_PATH = r'/home/rlfowler/Documents/research/tfo_inverse_modelling/Randalls Folder/data/randall_data_intensities.pkl'
+COPY_DATA = True            # Create copy of data for each run or reload data each time (True uses more memory, False uses more time)
+LABEL_START_INDEX = 7       # All columns before this index are considered output features
+DATA_LOADER_PARAMS = None   # Default set if none
 
 
 if __name__ == "__main__":
-    pass
+    with tqdm(total=total_counter(data_params, train_params, model_params), desc="Sweeping") as pbar:
+        if COPY_DATA:
+            df:DataFrame = pd.read_pickle(DATA_PATH)
+        for filter_method, apply_log in itertools.product(data_params['filter_method'], data_params['log_transform']):
+            try:
+                # Read data and filter
+                if COPY_DATA:
+                    data = df.copy()
+                else:
+                    data:DataFrame = pd.read_pickle(DATA_PATH)
+                data = filter_method(data)
+
+                # Get input and output columns
+                x_columns = data.columns[LABEL_START_INDEX:]    # Input columns
+                y_columns = data.columns[:LABEL_START_INDEX]    # Output columns
+
+                # Apply log transformation to the data
+                if apply_log:
+                    data[x_columns] = np.log(data[x_columns])
+
+                # Normalize the data
+                y_scaler = preprocessing.StandardScaler()
+                data[y_columns] = y_scaler.fit_transform(data[y_columns])
+                x_scaler = preprocessing.StandardScaler()
+                data[x_columns] = x_scaler.fit_transform(data[x_columns])
+
+                for data_params_tuple in itertools.product(*[data_params[key] for key in data_params.keys() if key != 'filter_method' and key != 'log_transform']):
+                    try:
+                        output_labels, input_labels, random_seed, batch_size, validation_method = data_params_tuple
+                        # Fix label indices
+                        if output_labels is None:
+                            output_labels = range(len(y_columns))
+                        if input_labels is None:
+                            input_labels = range(len(x_columns))
+
+                        # Set the seed
+                        set_seed(random_seed)
+
+                        # Create data loaders
+                        DLG = DataLoaderGenerator(data, x_columns[input_labels], y_columns[output_labels], validation_method, batch_size, DATA_LOADER_PARAMS)
+                        train_loader, val_loader = DLG.generate()
+
+
+
+
+
+
+                        """
+                        CHECK AUTOGENERATED CODE (START)
+                        """
+
+
+                        for train_params_tuple in itertools.product(*[train_params[key] for key in train_params.keys()]):
+                            try:
+                                num_epochs, learning_rate, weight_decay = train_params_tuple
+                                for model_params_tuple in itertools.product(*[model_params[key] for key in model_params.keys()]):
+                                    try:
+                                        model_class, hidden_layers, activation, dropout, batch_norm = model_params_tuple
+                                        model = model_class(
+                                            node_counts=[len(x_columns[input_labels])] + hidden_layers + [len(y_columns[output_labels])],
+                                            dropout_rates=dropout,
+                                            batch_norm=batch_norm,
+                                            act_funcs=activation,
+                                            validation_method=validation_method,
+                                            loss_func=None,
+                                            optimizer=None
+                                        )
+                                        model.train(train_loader, val_loader, num_epochs, learning_rate, weight_decay)
+                                        pbar.update(1)
+                                    except Exception as e:
+                                        print(f"Error training model: {e}")
+                                        continue
+                                    
+                            except Exception as e:
+                                print(f"Error preparing model: {e}")
+                                continue
+                        
+
+
+                        """
+                        CHECK AUTOGENERATED CODE (END)
+                        """
+
+
+
+                    except Exception as e:
+                        print(f"Error preparing data: {e}")
+                        continue
+
+            except Exception as e:
+                print(f"Error filtering data: {e}")
+                continue
+
+
