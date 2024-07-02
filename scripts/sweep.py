@@ -8,12 +8,13 @@ import os
 import sys
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 sys.path.append(r'/home/rlfowler/Documents/research/TFO-Inverse-Modeling')
-from model import MLP
+from mtools import MLP
 import torch.nn as nn
 import torch
 import itertools
 from sklearn import preprocessing
-from model import set_seed, data_filter1, validation1, total_counter, DataLoaderGenerator
+from mtools import RandomSplit, custom_holdout
+from mtools import set_seed, data_filter1, total_counter, DataLoaderGenerator
 
 
 # Iterator skips for the sweep
@@ -29,7 +30,7 @@ data_params['random_seed'] = [42]            # Random seed for the model (not im
 data_params['log_transform'] = [True]        # Log transform the data
 data_params['batch_size'] = [32, 512]           # Batch size for training
 data_params['filter_method'] = [data_filter1]       # Method for filtering data
-data_params['validation_method'] = [validation1]    # Method for splitting data into training and validation sets
+data_params['validation_method'] = [custom_holdout(0), RandomSplit(0.8)]    # Method for splitting data into training and validation sets
 
 
 # List of training parameters to sweep over
@@ -56,19 +57,19 @@ model_params['batch_norm'] = [True] # Batch normalization for the hidden layers
 
 # Constants in Sweep
 DATA_PATH = r'/home/rlfowler/Documents/research/tfo_inverse_modelling/Randalls Folder/data/randall_data_intensities.pkl'
-COPY_DATA = True            # Create copy of data for each run or reload data each time (True uses more memory, False uses more time)
+COPY_PICKLE = True            # Create copy of data for each filtering (True uses more memory, False uses more time)
 LABEL_START_INDEX = 7       # All columns before this index are considered output features
 DATA_LOADER_PARAMS = None   # Default set if none
 
 
 if __name__ == "__main__":
     with tqdm(total=total_counter(data_params, train_params, model_params), desc="Sweeping") as pbar:
-        if COPY_DATA:
+        if COPY_PICKLE:
             df:DataFrame = pd.read_pickle(DATA_PATH)
         for filter_method, apply_log in itertools.product(data_params['filter_method'], data_params['log_transform']):
             try:
                 # Read data and filter
-                if COPY_DATA:
+                if COPY_PICKLE:
                     data = df.copy()
                 else:
                     data:DataFrame = pd.read_pickle(DATA_PATH)
@@ -93,9 +94,9 @@ if __name__ == "__main__":
                         output_labels, input_labels, random_seed, batch_size, validation_method = data_params_tuple
                         # Fix label indices
                         if output_labels is None:
-                            output_labels = range(len(y_columns))
+                            output_labels = [*range(len(y_columns))]
                         if input_labels is None:
-                            input_labels = range(len(x_columns))
+                            input_labels = [*range(len(x_columns))]
 
                         # Set the seed
                         set_seed(random_seed)

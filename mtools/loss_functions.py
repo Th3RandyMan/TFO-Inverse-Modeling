@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 from matplotlib import pyplot as plt
 import torch
-from .utils import DATA_LOADER_LABEL_INDEX
+from .misc import DATA_LOADER_LABEL_INDEX
 
 
 class LossTracker:

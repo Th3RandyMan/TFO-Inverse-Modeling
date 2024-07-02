@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 from .validation_methods import ValidationMethod
 from .loss_functions import LossFunction
-from .utils import DATA_LOADER_INPUT_INDEX
+from .misc import DATA_LOADER_INPUT_INDEX
 from torch.optim import Optimizer
 
 class BaseModel(nn.Module):
