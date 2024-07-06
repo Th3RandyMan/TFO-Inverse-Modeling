@@ -1,5 +1,6 @@
 """
 A set of custom loss function meant to be used with the ModelTrainer Class
+Note: Would like to change the mode name to reflect in plot. Currently saved in dictionary with set name.
 """
 
 from abc import ABC, abstractmethod
@@ -50,7 +51,7 @@ class LossTracker:
                 self.step_loss_sum[loss_name] = 0.0  # Reset
                 self.steps_per_epoch_count[loss_name] = 0  # Reset
 
-    def plot_losses(self) -> None:
+    def plot_losses(self, legend:bool=True) -> None:
         """
         Plot the losses on the current axes
         """
@@ -59,6 +60,7 @@ class LossTracker:
             return
         for loss_name, loss_values in self.epoch_losses.items():
             plt.plot(loss_values, label=loss_name)
+        if legend:
             plt.legend()
 
     def reset(self):

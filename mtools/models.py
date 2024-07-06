@@ -12,19 +12,17 @@ class BaseModel(nn.Module):
     """
     Base class for all models.
     """
-    model: nn.Module = None
+    model: nn.Module    # This cannot be None. It must be set in the child class
     layers: List[nn.Module] = []
-    mode: str = None
 
-    def __init__(self, validation_method: ValidationMethod=None, loss_func: LossFunction=None, optimizer: Optimizer=None) -> None:
+    def __init__(self, validation_method: ValidationMethod=None, loss_func: LossFunction=None) -> None:
         super().__init__()
         self.validation_method:ValidationMethod = validation_method
         self.loss_func:LossFunction = loss_func
-        self.optimizer:Optimizer = optimizer
 
     def _reset_layer(self, layer: nn.Module) -> None:
         """
-        Reset the parameters of the layer
+        Reset the parameters of the layer.
         """
         if hasattr(layer, "reset_parameters"):
             layer.reset_parameters()
@@ -34,6 +32,7 @@ class BaseModel(nn.Module):
         Reset the model parameters
         """
         self.model.apply(self._reset_layer)
+        self.loss_func.reset()
 
     def reset_optimizer(self) -> None:
         """
@@ -45,7 +44,7 @@ class BaseModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
     
-    def run_training(self, train_loader: DataLoader, val_loader: DataLoader=None, epochs: int=1, device: torch.device=None):
+    def run_training(self, optimizer: Optimizer, train_loader: DataLoader, val_loader: DataLoader=None, epochs: int=1, device: torch.device=None):
         """
         Run the training loop for the model
         Args:
@@ -54,16 +53,16 @@ class BaseModel(nn.Module):
             epochs (int): Number of epochs for training
             device (torch.device): Device to be used for training
         """
+        self.optimizer = optimizer
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             
         self.to(device)
-        self.mode = "train"
         self.train()
 
-        for epoch in epochs:
+        for epoch in range(epochs):
             # Training loop
-            for data in self.train_loader:
+            for data in train_loader:
                 inputs = data[DATA_LOADER_INPUT_INDEX]
 
                 # zero the parameter gradients - previous batch gradients are not used
@@ -71,22 +70,20 @@ class BaseModel(nn.Module):
 
                 # forward + backward + optimize
                 outputs = self.model(inputs)
-                loss = self.loss_func(outputs, data, self.mode)
+                loss = self.loss_func(outputs, data, "train")
                 loss.backward()
                 self.optimizer.step()
 
             # Validation loop
             if val_loader is not None:
-                self.mode = "validate"
                 self.eval()
                 with torch.no_grad():
                     for data in val_loader:
                         inputs = data[DATA_LOADER_INPUT_INDEX]
                         outputs = self.model(inputs)
-                        loss = self.loss_func(outputs, data, self.mode)
+                        loss = self.loss_func(outputs, data, "validate")
 
                 # Switch back to training mode
-                self.mode = "train"
                 self.train()
             self.loss_func.loss_tracker_epoch_update()
 
@@ -114,7 +111,6 @@ class MLP(BaseModel):
             act_funcs: Optional[List[float]] = [nn.ReLU()],
             validation_method: ValidationMethod=None, 
             loss_func: LossFunction=None, 
-            optimizer: Optimizer=None
             ) -> None:
         """
         Args:
@@ -131,7 +127,7 @@ class MLP(BaseModel):
             loss_func (LossFunction): Loss function
             optimizer (Optimizer): Optimizer
         """
-        super().__init__(validation_method, loss_func, optimizer)
+        super().__init__(validation_method, loss_func)
         
         dropout = False if dropout_rates is None else True
         if dropout and len(dropout_rates) != len(node_counts) - 1:
@@ -139,24 +135,25 @@ class MLP(BaseModel):
                 dropout_rates = dropout_rates * (len(node_counts) - 1)
             else:
                 raise ValueError("Dropout rates must be equal to the number of hidden layers or 1 for all layers.")
-        if len(act_funcs) != len(node_counts):
+        if len(act_funcs) != len(node_counts) - 1:  # Last layer may or may not have an activation function
             if len(act_funcs) == 1:
                 act_funcs = act_funcs * (len(node_counts) - 1)  # Assume last layer does not have an activation function
-            elif len(act_funcs) != len(node_counts) - 1:    # Last layer may or may not have an activation function
+            elif len(act_funcs) != len(node_counts) - 2:    # Last layer may or may not have an activation function
                 raise ValueError("Activation functions must be equal to the number of hidden layers or 1 for all layers.")
 
-        for indx, node_count in enumerate(node_counts[:-1]):
-            self.layers.append(nn.Linear(node_count, node_counts[1]))
+        self.layers = []    # Need this to reset layers when resetting the model
+        for indx, node_count in enumerate(node_counts[:-2]):
+            self.layers.append(nn.Linear(node_count, node_counts[indx + 1]))
             if batch_norm:
-                self.layers.append(nn.BatchNorm1d(node_count))
+                self.layers.append(nn.BatchNorm1d(node_counts[indx + 1]))
             if dropout:
                 self.layers.append(nn.Dropout(dropout_rates[indx]))
-            self.layers.append(act_funcs[indx]())
+            self.layers.append(act_funcs[indx])
         
         self.layers.append(nn.Linear(node_counts[-2], node_counts[-1]))
         self.layers.append(nn.Flatten())
         if len(act_funcs) == len(node_counts):  # Last layer has an activation function
-            self.layers.append(act_funcs[-1]())
+            self.layers.append(act_funcs[-1])
         
         # Create the model
         self.model = nn.Sequential(*self.layers)

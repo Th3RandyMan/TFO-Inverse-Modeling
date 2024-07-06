@@ -54,16 +54,6 @@ class DataLoaderGenerator:
         else:
             self.data_loader_params = deepcopy(data_loader_params)
 
-    def change_batch_size(self, new_batch_size: int) -> None:
-        """
-        Changes the batch size of the dataloaders
-
-        Args:
-            new_batch_size (int): New batch size
-        """
-        self.data_loader_params["batch_size"] = new_batch_size
-        self.batch_size = new_batch_size
-
     def generate(
             self, 
             data:DataFrame=None, 
@@ -128,6 +118,7 @@ class DataLoaderGenerator:
         )
 
         # Create the data loaders
+        self.data_loader_params["batch_size"] = self.batch_size
         train_loader = DataLoader(training_dataset, **self.data_loader_params)
         val_loader = DataLoader(validation_dataset, **self.data_loader_params)
 

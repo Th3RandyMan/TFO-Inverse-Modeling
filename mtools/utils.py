@@ -3,7 +3,9 @@ Misc. functions useful during model training
 """
 from typing import List, Optional, Tuple, Union
 import numpy as np
-from pandas import DataFrame
+from pandas import DataFrame, Index
+from torch.nn.modules.loss import _Loss
+from .loss_functions import LossFunction, SumLoss, TorchLossWrapper
 from .validation_methods import CombineMethods, HoldOneOut, RandomSplit
 
 
@@ -94,19 +96,6 @@ def random_filter(data:DataFrame, fraction: float = 0.05) -> DataFrame:
 """
 Functions for premade validation methods
 """
-# def validation1(data):
-#     """
-#     Custom validation method
-
-#     Args:
-#         data: Data to split
-
-#     Returns:
-#         Tuple of train and validation data
-#     """
-#     raise NotImplementedError("Custom validation method not implemented")
-#     return data, data
-
 class custom_holdout(CombineMethods,HoldOneOut):
     """
     
@@ -162,3 +151,37 @@ class custom_holdout(CombineMethods,HoldOneOut):
                 val_methods.append(RandomSplit(train_split=self.random_split))
             CombineMethods.__init__(self, val_methods)
             return CombineMethods.split(self, data)
+        
+
+"""
+Functions for premade criterion functions
+"""
+def get_combined_criterion(loss_func: _Loss, y_columns:Union[Index, List[str]] = None, output_labels: Optional[Union[List[int], int]]=None, name:str=None) -> LossFunction:
+    """
+    Get the loss function wrapper based on the loss function and output labels.
+
+    Args:
+        loss_func: Loss function
+
+    Returns:
+        Loss function
+    """
+    return TorchLossWrapper(loss_func(), name=name)
+
+def get_individual_criterion(loss_func: _Loss, y_columns:Union[Index, List[str]], output_labels: Optional[Union[List[int], int]]=None, name:str=None) -> LossFunction:
+    """
+    Get the loss function wrapper based on the loss function and output labels.
+
+    Args:
+        loss_func: Loss function
+        y_columns: Output columns
+        output_labels: Output labels
+
+    Returns:
+        Loss function
+    """
+    if output_labels is None:
+        output_labels = [*range(len(y_columns))]
+    elif type(output_labels) == int:
+        output_labels = [output_labels]
+    return SumLoss([TorchLossWrapper(loss_func(), [i], y_columns[i]) for i in range(len(y_columns)) if i in output_labels], weights=[1]*len(output_labels))
