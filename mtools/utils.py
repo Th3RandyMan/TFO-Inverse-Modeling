@@ -22,10 +22,46 @@ def total_counter(*dictionaries: Tuple[dict]) -> int:
     return np.prod([len(dictionary[key]) for dictionary in dictionaries for key in dictionary])
 
 
+class CombineFilters:
+    """
+    Combines multiple data filters
+    """
+    def __init__(self, filters: Union[List[callable],callable], *args) -> None:
+        """
+        Args:
+            filters: List of data filters
+        """
+        if type(filters) == list:
+            self.filters = filters
+        elif callable(filters):
+            self.filters = [filters]
+        else:
+            raise ValueError("filters must be a list or callable")
+        
+        for arg in args:
+            if callable(arg):
+                self.filters.append(arg)
+            else:
+                raise ValueError("args must be a callable")
+
+    def __call__(self, *args) -> DataFrame:
+        """
+        Filters the data using the combined filters
+
+        Args:
+            data: Data to filter
+
+        Returns:
+            Filtered data
+        """
+        for filter in self.filters:
+            data = filter(*args)
+        return data
+
 """
 Functions for filtering data
 """
-def data_filter1(data:DataFrame) -> DataFrame:
+def data_filter1(data:DataFrame, LABEL_START_INDEX=None) -> DataFrame:
     """
     Filters the data using a custom method.
     The data is filtered to keep only a subset of the unique values in the columns:
@@ -49,7 +85,7 @@ def data_filter1(data:DataFrame) -> DataFrame:
         data = data.loc[data[col].isin(keep)]
     return data
 
-def data_filter2(data:DataFrame) -> DataFrame:
+def data_filter2(data:DataFrame, LABEL_START_INDEX=None) -> DataFrame:
     """
     Filters the data using a custom method.
     The data is filtered to keep only a subset of the unique values in the columns:
@@ -75,6 +111,83 @@ def data_filter2(data:DataFrame) -> DataFrame:
     for col, keep in zip(columns, to_keep):
         data = data.loc[data[col].isin(keep)]
     return data
+
+def data_filter_remove_fr(data:DataFrame, LABEL_START_INDEX=None) -> DataFrame:
+    """
+    
+    """
+    LAST = 10   # Get last 10 values, hopefully the larger values
+
+    if 'Fetal Radius' not in data.columns:
+        raise ValueError("Fetal Radius column not found in data")
+    
+    uniq_fr = np.unique(data['Fetal Radius'])
+    if len(uniq_fr) <= LAST:
+        print(f"Unique Fetal Radius values less than or equal to {LAST}. Returning original data")
+        return data
+
+    fetal_radius_keep = np.unique(data['Fetal Radius'])[-1*LAST:]
+    data = data[data['Fetal Radius'].isin(fetal_radius_keep)]
+    
+    return data
+
+def data_filter_remove_fd(data:DataFrame, LABEL_START_INDEX=None) -> DataFrame:
+    """
+    
+    """
+    if 'Fetal Displacement' not in data.columns:
+        raise ValueError("Fetal Displacement column not found in data")
+    
+    data = data[data['Fetal Displacement'].isin([0])]
+
+    return data
+
+# Dont use! Just select inputs
+# def data_filter_5_detectors(data:DataFrame, LABEL_START_INDEX=None) -> DataFrame:
+#     """
+    
+#     """
+#     SELECTED_DISTANCES = [15, 33, 46, 68, 94]
+
+#     if LABEL_START_INDEX is None:
+#         for i, col in enumerate(data.columns):
+#             col = col.split('_')[0]
+#             try:    # Look for column with float values
+#                 float(col)
+#                 LABEL_START_INDEX = i
+#                 break
+#             except:
+#                 continue
+
+#     #wavelengths = []
+#     distances = []
+
+#     for det_name in data.columns[LABEL_START_INDEX:]:
+#         name_split = det_name.split('_')
+#         distances += [name_split[0]]
+#         #wavelengths += [name_split[1]]
+
+#     distances = list(set(float(dist) for dist in distances))
+#     #wavelengths = list(set(wavelengths))
+#     closest_distance = [str(min(distances, key=lambda x: abs(x - dist))) for dist in SELECTED_DISTANCES]
+
+#     keep_list = data.columns[:LABEL_START_INDEX].tolist()
+#     for det_name in data.columns[LABEL_START_INDEX:]:
+#         name_split = det_name.split('_')
+#         if name_split[0] in closest_distance:
+#             keep_list.append(det_name)
+    
+#     return data[keep_list]
+    
+
+
+
+
+# def pr_5_detector_filter(data:DataFrame) -> DataFrame:
+#     """
+    
+#     """
+#     pass
 
 
 def random_filter(data:DataFrame, fraction: float = 0.05) -> DataFrame:
@@ -184,4 +297,4 @@ def get_individual_criterion(loss_func: _Loss, y_columns:Union[Index, List[str]]
         output_labels = [*range(len(y_columns))]
     elif type(output_labels) == int:
         output_labels = [output_labels]
-    return SumLoss([TorchLossWrapper(loss_func(), [i], y_columns[i]) for i in range(len(y_columns)) if i in output_labels], weights=[1]*len(output_labels))
+    return SumLoss([TorchLossWrapper(loss_func(), [i], y_columns[i]) for i in range(len(y_columns)) if i in output_labels], weights=[1/len(output_labels)]*len(output_labels))

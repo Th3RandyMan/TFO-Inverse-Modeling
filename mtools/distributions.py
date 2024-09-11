@@ -37,6 +37,7 @@ def generate_model_error_and_prediction(
     model = model.eval()
     model_cpu = model.cpu()  # All calculations need to be on the CPU for numpy to work
     row_count, _ = data_loader.dataset[:][1].shape  # Size of the entire y-labels Tensors
+    output_labels = [int(np.where(labels_scaler.feature_names_in_ == name)[0][0]) for name in labels]
     # batch_size = data_loader.batch_size if isinstance(data_loader.batch_size, int) else -1
 
     # if batch_size == -1:
@@ -51,8 +52,11 @@ def generate_model_error_and_prediction(
         for index, data in enumerate(data_loader):
             x = data[DATA_LOADER_INPUT_INDEX].cpu()     # Numpy operations require the data to be on the CPU
             y = data[DATA_LOADER_LABEL_INDEX].cpu()    # Numpy operations require the data to be on the CPU
-            predictions = labels_scaler.inverse_transform(model_cpu(x))
-            ground_truth = labels_scaler.inverse_transform(y)
+            # predictions = labels_scaler.inverse_transform(model_cpu(x))
+            # ground_truth = labels_scaler.inverse_transform(y)
+            predictions = labels_scaler.inverse_transform(torch.cat([model_cpu(x)]*len(labels_scaler.feature_names_in_), dim=1))[:,output_labels]
+            ground_truth = labels_scaler.inverse_transform(torch.cat([y]*len(labels_scaler.feature_names_in_), dim=1))[:,output_labels]
+
             error = error_func(predictions, ground_truth)
             # Store both the errors and predictions (in that order)
             left_pointer = index * batch_size

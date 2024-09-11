@@ -44,7 +44,7 @@ class BaseModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
     
-    def run_training(self, optimizer: Optimizer, train_loader: DataLoader, val_loader: DataLoader=None, epochs: int=1, device: torch.device=None):
+    def run_training(self, optimizer: Optimizer, train_loader: DataLoader, val_loader: DataLoader=None, epochs: int=1, device: torch.device=None, early_stop:Optional[int]=15, verbose:bool=False) -> None:
         """
         Run the training loop for the model
         Args:
@@ -57,13 +57,17 @@ class BaseModel(nn.Module):
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             
+        early_stop_counter = 0
+        best_state = None
+        best_loss = float("inf")
+
         self.to(device)
         self.train()
 
         for epoch in range(epochs):
             # Training loop
-            for data in train_loader:
-                inputs = data[DATA_LOADER_INPUT_INDEX]
+            for data in train_loader:   # Better to put data on gpu before or after? Right now, done before?
+                inputs = data[DATA_LOADER_INPUT_INDEX] # Could be done here though
 
                 # zero the parameter gradients - previous batch gradients are not used
                 self.optimizer.zero_grad()
@@ -77,15 +81,42 @@ class BaseModel(nn.Module):
             # Validation loop
             if val_loader is not None:
                 self.eval()
+                # avg_loss = 0
                 with torch.no_grad():
                     for data in val_loader:
                         inputs = data[DATA_LOADER_INPUT_INDEX]
                         outputs = self.model(inputs)
                         loss = self.loss_func(outputs, data, "validate")
+                        # avg_loss += loss.item()
 
                 # Switch back to training mode
                 self.train()
-            self.loss_func.loss_tracker_epoch_update()
+
+                # Update loss tracker
+                self.loss_func.loss_tracker_epoch_update()  
+                avg_loss = self.loss_func.loss_tracker.epoch_losses['val_loss'][-1]                  
+                
+                # Print update message
+                if verbose:
+                    print(f"Epoch {epoch + 1}/{epochs} - Training Loss: {self.loss_func.loss_tracker.epoch_losses['train_loss'][-1]:.4e} - Validation Loss: {avg_loss:.4e}")
+
+                # Check validation loss for early stopping
+                if early_stop is not None:  # MAYBE ADD CONDITION FOR EVERY LOSS TERM IN LOSS TRACKER
+                    if avg_loss < best_loss:
+                        best_loss = avg_loss
+                        best_state = self.model.state_dict()
+                        early_stop_counter = 0
+                    else:
+                        early_stop_counter += 1
+                        if early_stop_counter == early_stop:
+                            print(f"Early stopping at epoch {epoch}.")
+                            break
+
+            else:
+                self.loss_func.loss_tracker_epoch_update()
+
+        if best_state is not None:
+            self.model.load_state_dict(best_state)
 
     def __str__(self) -> str:
         return f"""

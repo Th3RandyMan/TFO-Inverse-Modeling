@@ -30,8 +30,8 @@ class DataLoaderGenerator:
             Tuple[DataLoader, DataLoader]: DataLoader objects for training and validation data.
         """
         self.data = data
-        self.x_columns = x_columns
-        self.y_columns = y_columns
+        self.x_columns = [x_columns] if isinstance(x_columns, str) else x_columns
+        self.y_columns = [y_columns] if isinstance(y_columns, str) else y_columns
         self.batch_size = batch_size
 
         if validation_method is not None:
@@ -82,12 +82,16 @@ class DataLoaderGenerator:
                 raise ValueError("data must be provided")
 
         if x_columns is not None:
+            if isinstance(x_columns, str):
+                x_columns = [x_columns]
             self.x_columns = x_columns
         else:
             if self.x_columns is None:
                 raise ValueError("x_columns must be provided")
             
         if y_columns is not None:
+            if isinstance(y_columns, str):
+                y_columns = [y_columns]
             self.y_columns = y_columns
         else:
             if self.y_columns is None:

@@ -11,6 +11,21 @@ from typing import Tuple, Union, List
 from .distributions import generate_model_error_and_prediction
 
 """
+String formatting functions
+"""
+def dict_str(dictionary:dict) -> str:
+    """
+    Convert a dictionary to a string
+
+    Args:
+        dictionary: Dictionary to convert
+
+    Returns:
+        str: String representation of the dictionary
+    """
+    return '\n\t'.join([f'{key}: {value}' for key, value in dictionary.items()])
+
+"""
 Functions for plotting the loss
 """
 def _set_plot_settings(log:bool=False, title:str=None, xlabel:str=None, ylabel:str=None, legend:bool=False) -> None:
@@ -52,7 +67,7 @@ def get_loss_fig(loss_func: LossFunction, log:bool=False, title:str=None, xlabel
         Figure object
     """
 
-    if isinstance(loss_func, TorchLossWrapper):
+    if isinstance(loss_func, TorchLossWrapper) or (isinstance(loss_func, SumLoss) and len(loss_func.train_losses) == 1):
         fig = plt.figure()
         loss_func.loss_tracker.plot_losses(legend=legend)
         _set_plot_settings(log, title, xlabel, ylabel)
@@ -76,7 +91,7 @@ def get_loss_fig(loss_func: LossFunction, log:bool=False, title:str=None, xlabel
 """
 Functions for plotting the error distribution plots
 """
-def get_error_distrubition_fig(model:Module, train_loader:DataLoader, val_loader:DataLoader, y_columns:Union[Index, List[str]], y_scalar:StandardScaler, train_data:DataFrame=None, val_data:DataFrame=None, bin_count:int=50) -> Figure:
+def get_error_distrubition_fig(model:Module, train_loader:DataLoader, val_loader:DataLoader, y_columns:Union[Index, List[str]], y_scalar:StandardScaler, train_data:DataFrame=None, val_data:DataFrame=None, bin_count:int=50) -> Tuple[Figure, Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
     """
     Get the figure for the error distribution plots
 
@@ -170,23 +185,61 @@ def get_error_stats(model:Module, train_loader:DataLoader, val_loader:DataLoader
     train_error, _ = generate_model_error_and_prediction(model, train_loader, y_columns, y_scalar)
     val_error, _ = generate_model_error_and_prediction(model, val_loader, y_columns, y_scalar)
 
-    u_train_err = np.zeros(len(y_columns))
-    std_train_err = np.zeros(len(y_columns))
-    u_val_err = np.zeros(len(y_columns))
-    std_val_err = np.zeros(len(y_columns))
-    for i in range(len(y_columns)):
+    L = len(y_columns) + 1
+    u_train_err = np.zeros(L)
+    std_train_err = np.zeros(L)
+    u_val_err = np.zeros(L)
+    std_val_err = np.zeros(L)
+    for i in range(L):
         column_name = train_error.columns[i]
         u_train_err[i] = train_error[column_name].mean()
         std_train_err[i] = train_error[column_name].std()
         u_val_err[i] = val_error[column_name].mean()
         std_val_err[i] = val_error[column_name].std()
+    # Add the overall error
+    u_train_err[-1] = np.mean(u_train_err[:-1])
+    std_train_err[-1] = np.sqrt(np.sum(std_train_err[:-1]**2))
+    u_val_err[-1] = np.mean(u_val_err[:-1])
+    std_val_err[-1] = np.sqrt(np.sum(std_val_err[:-1]**2))
 
     return (u_train_err, std_train_err), (u_val_err, std_val_err)
 
 
-class MetricTracker():
+"""
+Functions for handling the dataframes
+"""
+def get_stats_row(train_stats:Tuple[np.ndarray, np.ndarray], val_stats:Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
     """
+    Get the row of statistics
+    """
+    return np.concatenate([train_stats, val_stats]).transpose().flatten()
+
+def get_loss_row(loss_func:LossFunction) -> np.ndarray:
+    """
+    Get the row of losses
+    """
+    if isinstance(loss_func, TorchLossWrapper):
+        raise NotImplementedError
+    elif isinstance(loss_func, SumLoss):
+        return np.array([losses[-1] for losses in loss_func.loss_tracker.epoch_losses.values()])
     
+def plot_stats(df:DataFrame) -> Figure:
     """
-    def __init__(self):
-        self.metrics = DataFrame()
+    Plot the statistics
+    """
+    X = np.arange(len(df), dtype=int)
+
+    fig, axes = plt.subplots(1, len(df.columns)//4, figsize=(3*len(df.columns)//4, 6))
+    axes = axes.flatten()
+    for i in range(0, len(df.columns), 4):
+        name = ' '.join(df.columns[i].split(' ')[:-2])
+        train_u, train_std, val_u, val_std = df.values[:, i:i+4].transpose()
+        ax = axes[i//4]
+        plt.sca(ax)
+        plt.title(name)
+        plt.ylabel('MSE')
+        plt.errorbar(X-0.1, train_u, yerr=train_std, fmt='o', label='Train')
+        plt.errorbar(X+0.1, val_u, yerr=val_std, fmt='^', label='Validation')
+    plt.tight_layout()
+    plt.legend()
+    return fig
