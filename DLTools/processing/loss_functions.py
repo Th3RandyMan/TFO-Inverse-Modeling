@@ -4,10 +4,12 @@ Note: Would like to change the mode name to reflect in plot. Currently saved in 
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
+from pandas import Index
 from matplotlib import pyplot as plt
 import torch
-from .misc import DATA_LOADER_LABEL_INDEX
+from torch.nn.modules.loss import _Loss
+from .dataloader import DATA_LOADER_LABEL_INDEX
 
 
 class LossTracker:
@@ -312,3 +314,42 @@ class DynamicWeightLoss(LossFunction):
     def reset(self) -> None:
         self.current_epoch = 0
         self.loss_tracker = LossTracker([self.train_loss_name, self.val_loss_name])
+
+
+"""
+Functions for premade criterion functions
+"""
+def get_combined_criterion(loss_func: _Loss, y_columns:Union[Index, List[str]] = None, output_labels: Optional[Union[List[int], int]]=None, name:str=None) -> LossFunction:
+    """
+    Get the loss function wrapper based on the loss function and output labels.
+
+    Args:
+        loss_func: Loss function
+
+    Returns:
+        Loss function
+    """
+    return TorchLossWrapper(loss_func(), name=name)
+
+def get_individual_criterion(loss_func: _Loss, y_columns:Union[Index, List[str]], output_labels: Optional[Union[List[int], int]]=None, name:str=None) -> LossFunction:
+    """
+    Get the loss function wrapper based on the loss function and output labels.
+
+    Args:
+        loss_func: Loss function
+        y_columns: Output columns
+        output_labels: Output labels
+
+    Returns:
+        Loss function
+    """
+    if output_labels is None:
+        output_labels = [*range(len(y_columns))]
+    elif type(output_labels) == int:
+        output_labels = [output_labels]
+
+    if len(output_labels) == 1:
+        return TorchLossWrapper(loss_func(), [output_labels[0]], name=name)
+    elif len(output_labels) < 1:
+        raise ValueError("Output labels cannot be empty!")
+    return SumLoss([TorchLossWrapper(loss_func(), [i], y_columns[i]) for i in range(len(y_columns)) if i in output_labels], weights=[1/len(output_labels)]*len(output_labels))

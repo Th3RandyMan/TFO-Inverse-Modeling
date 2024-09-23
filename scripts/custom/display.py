@@ -2,7 +2,7 @@
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 import numpy as np
-from .loss_functions import LossFunction, TorchLossWrapper, SumLoss
+from ...DLTools.processing.loss_functions import LossFunction, TorchLossWrapper, SumLoss
 from sklearn.preprocessing import StandardScaler
 from torch.nn import Module
 from torch.utils.data import DataLoader
@@ -230,11 +230,15 @@ def plot_stats(df:DataFrame) -> Figure:
     X = np.arange(len(df), dtype=int)
 
     fig, axes = plt.subplots(1, len(df.columns)//4, figsize=(3*len(df.columns)//4, 6))
-    axes = axes.flatten()
+    if len(df.columns)//4 > 1:
+        axes = axes.flatten()
     for i in range(0, len(df.columns), 4):
         name = ' '.join(df.columns[i].split(' ')[:-2])
         train_u, train_std, val_u, val_std = df.values[:, i:i+4].transpose()
-        ax = axes[i//4]
+        if len(df.columns) > 4:
+            ax = axes[i//4]
+        else:
+            ax = axes
         plt.sca(ax)
         plt.title(name)
         plt.ylabel('MSE')

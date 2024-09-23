@@ -1,12 +1,12 @@
-
-from typing import List, Optional
+from typing import List, Optional, Union
 import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
-from .validation_methods import ValidationMethod
-from .loss_functions import LossFunction
-from .misc import DATA_LOADER_INPUT_INDEX
+from ..processing import DATA_LOADER_INPUT_INDEX
+from ..processing.validation_methods import ValidationMethod
+from ..processing.loss_functions import LossFunction
 from torch.optim import Optimizer
+
 
 class BaseModel(nn.Module):
     """
@@ -44,7 +44,7 @@ class BaseModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
     
-    def run_training(self, optimizer: Optimizer, train_loader: DataLoader, val_loader: DataLoader=None, epochs: int=1, device: torch.device=None, early_stop:Optional[int]=15, verbose:bool=False) -> None:
+    def run_training(self, optimizer: Optimizer, train_loader: DataLoader, val_loader: DataLoader=None, epochs: int=1, device: torch.device=None, early_stop:Optional[int]=15, verbose:bool=False) -> float:
         """
         Run the training loop for the model
         Args:
@@ -52,6 +52,9 @@ class BaseModel(nn.Module):
             val_loader (DataLoader): DataLoader object for validation data
             epochs (int): Number of epochs for training
             device (torch.device): Device to be used for training
+
+        Returns:
+            float: Best validation loss
         """
         self.optimizer = optimizer
         if device is None:
@@ -66,8 +69,9 @@ class BaseModel(nn.Module):
 
         for epoch in range(epochs):
             # Training loop
-            for data in train_loader:   # Better to put data on gpu before or after? Right now, done before?
+            for data in train_loader:
                 inputs = data[DATA_LOADER_INPUT_INDEX] # Could be done here though
+                inputs = inputs.to(device) # Slightly faster having this?
 
                 # zero the parameter gradients - previous batch gradients are not used
                 self.optimizer.zero_grad()
@@ -94,11 +98,12 @@ class BaseModel(nn.Module):
 
                 # Update loss tracker
                 self.loss_func.loss_tracker_epoch_update()  
+                # Should we add best_train_loss and best_val_loss for early stopping?
                 avg_loss = self.loss_func.loss_tracker.epoch_losses['val_loss'][-1]                  
                 
                 # Print update message
                 if verbose:
-                    print(f"Epoch {epoch + 1}/{epochs} - Training Loss: {self.loss_func.loss_tracker.epoch_losses['train_loss'][-1]:.4e} - Validation Loss: {avg_loss:.4e}")
+                    print(f"Epoch {epoch + 1}/{epochs} - Training Loss: {self.loss_func.loss_tracker.epoch_losses['train_loss'][-1]:.4e} - Validation Loss: {avg_loss:.4e}", flush=True)
 
                 # Check validation loss for early stopping
                 if early_stop is not None:  # MAYBE ADD CONDITION FOR EVERY LOSS TERM IN LOSS TRACKER
@@ -117,6 +122,7 @@ class BaseModel(nn.Module):
 
         if best_state is not None:
             self.model.load_state_dict(best_state)
+        return best_loss
 
     def __str__(self) -> str:
         return f"""
@@ -129,64 +135,30 @@ class BaseModel(nn.Module):
         Optimizer Properties":
         {self.optimizer}
         """
-
-
-class MLP(BaseModel):
-    """
-    Multi Layer Perceptron model
-    """
-    def __init__(
-            self, node_counts: List[int], 
-            dropout_rates: Optional[List[float]] = None, 
-            batch_norm: bool = True, 
-            act_funcs: Optional[List[float]] = [nn.ReLU()],
-            validation_method: ValidationMethod=None, 
-            loss_func: LossFunction=None, 
-            ) -> None:
+    
+    def save(self, path: str) -> None:
         """
-        Args:
-            node_counts (List[int]): Number of nodes in each layer
-            dropout_rates (Optional[List[float]]): Dropout rates for each layer
-                - If None, dropout is not used
-                - If a single value, the same dropout rate is used for all layers
-            batch_norm (bool): Whether to use batch normalization
-            act_funcs (Optional[List[nn.Module]]): Activation functions for each layer
-                - If None, ReLU is used for all layers except the last layer
-                - If a single value, the same activation function is used for all layers except the last layer
-                - List can be equal to the number of layers or one less than the number of layers
-            validation_method (ValidationMethod): Validation method
-            loss_func (LossFunction): Loss function
-            optimizer (Optimizer): Optimizer
+        Save the model to the specified path
         """
-        super().__init__(validation_method, loss_func)
-        
-        dropout = False if dropout_rates is None else True
-        if dropout and len(dropout_rates) != len(node_counts) - 1:
-            if len(dropout_rates) == 1:
-                dropout_rates = dropout_rates * (len(node_counts) - 1)
-            else:
-                raise ValueError("Dropout rates must be equal to the number of hidden layers or 1 for all layers.")
-        if len(act_funcs) != len(node_counts) - 1:  # Last layer may or may not have an activation function
-            if len(act_funcs) == 1:
-                act_funcs = act_funcs * (len(node_counts) - 1)  # Assume last layer does not have an activation function
-            elif len(act_funcs) != len(node_counts) - 2:    # Last layer may or may not have an activation function
-                raise ValueError("Activation functions must be equal to the number of hidden layers or 1 for all layers.")
+        if not path.endswith(".pth"):
+            path += ".pth"
 
-        self.layers = []    # Need this to reset layers when resetting the model
-        for indx, node_count in enumerate(node_counts[:-2]):
-            self.layers.append(nn.Linear(node_count, node_counts[indx + 1]))
-            if batch_norm:
-                self.layers.append(nn.BatchNorm1d(node_counts[indx + 1]))
-            if dropout:
-                self.layers.append(nn.Dropout(dropout_rates[indx]))
-            self.layers.append(act_funcs[indx])
+        import os
         
-        self.layers.append(nn.Linear(node_counts[-2], node_counts[-1]))
-        self.layers.append(nn.Flatten())
-        if len(act_funcs) == len(node_counts):  # Last layer has an activation function
-            self.layers.append(act_funcs[-1])
+        parent_folder = os.path.dirname(path)
+        if not os.path.exists(parent_folder):
+            os.makedirs(parent_folder)
+
+        torch.save(self.model.state_dict(), path)
+
+    def load(self, path: str) -> None:
+        """
+        Load the model from the specified path
+        """
+        state_dict = torch.load(path)#, weight_only=True)
         
-        # Create the model
-        self.model = nn.Sequential(*self.layers)
+        try:
+            self.model.load_state_dict(state_dict)#, weight_only=True)
 
-
+        except RuntimeError as e:
+            raise RuntimeError(f"Check if keys are off. Error: {e}")

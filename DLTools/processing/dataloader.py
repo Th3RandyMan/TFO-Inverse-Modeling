@@ -6,6 +6,10 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 from .validation_methods import ValidationMethod
 
+
+# CONSTANTS
+DATA_LOADER_INPUT_INDEX, DATA_LOADER_LABEL_INDEX, DATA_LOADER_EXTRA_INDEX = 0, 1, 2
+
 class DataLoaderGenerator:
     """
     Class to generate DataLoader objects for training and validation data.
@@ -59,7 +63,7 @@ class DataLoaderGenerator:
             data:DataFrame=None, 
             x_columns:List[str]=None,
             y_columns:List[str]=None,
-            validation_method:ValidationMethod=None,
+            validation_method:Optional[ValidationMethod]=None,
             batch_size:int=-1,
             data_loader_params:Optional[Dict] = None,
             device: torch.device = None
@@ -99,15 +103,18 @@ class DataLoaderGenerator:
             
         if validation_method is not None:
             self.validation_method = validation_method
+        if self.validation_method is None:
+            train_data = self.data
+            val_data = None
+        else:
+            train_data, val_data = self.validation_method.split(self.data)
+
         if batch_size != -1:
             self.batch_size = batch_size
         if data_loader_params is not None:
             self.data_loader_params = deepcopy(data_loader_params)
         if device is not None:
             self.device = device
-
-        # Get the training and validation data
-        train_data, val_data = self.validation_method.split(self.data)
 
         # Create Datasets
         x_column_indices = [self.data.columns.tolist().index(x) for x in self.x_columns]
@@ -116,15 +123,19 @@ class DataLoaderGenerator:
             torch.tensor(train_data.iloc[:, x_column_indices].values, dtype=torch.float32).cuda(),
             torch.tensor(train_data.iloc[:, y_column_indices].values, dtype=torch.float32).cuda(),
         )
-        validation_dataset = TensorDataset(
-            torch.tensor(val_data.iloc[:, x_column_indices].values, dtype=torch.float32).cuda(),
-            torch.tensor(val_data.iloc[:, y_column_indices].values, dtype=torch.float32).cuda(),
-        )
 
         # Create the data loaders
         self.data_loader_params["batch_size"] = self.batch_size
         train_loader = DataLoader(training_dataset, **self.data_loader_params)
-        val_loader = DataLoader(validation_dataset, **self.data_loader_params)
+
+        if val_data is not None:
+            validation_dataset = TensorDataset(
+                torch.tensor(val_data.iloc[:, x_column_indices].values, dtype=torch.float32).cuda(),
+                torch.tensor(val_data.iloc[:, y_column_indices].values, dtype=torch.float32).cuda(),
+            )
+            val_loader = DataLoader(validation_dataset, **self.data_loader_params)
+        else:
+            val_loader = None
 
         return train_loader, val_loader
 

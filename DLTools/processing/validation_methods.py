@@ -5,10 +5,10 @@ Use these methods to generate two non-overlapping tables before passing them int
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple, Any, List
+from typing import Tuple, Any, List, Union, Optional
 import pandas as pd
+from pandas import DataFrame
 import numpy as np
-from .misc import set_seed
 
 
 class ValidationMethod(ABC):
@@ -31,7 +31,7 @@ class RandomSplit(ValidationMethod):
         self.seed = seed
 
     def split(self, table: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        set_seed(self.seed)
+        np.random.seed(self.seed)
         row_ids = np.arange(0, len(table), 1)
         np.random.shuffle(row_ids)
         train_ids = row_ids[: int(len(row_ids) * self.train_split)]
@@ -116,3 +116,62 @@ class CombineMethods(ValidationMethod):
 
     def __str__(self) -> str:
         return f"Combining the effects of {self.methods_to_combine} into the validation"
+
+"""
+Functions for premade validation methods
+"""
+class custom_holdout(CombineMethods,HoldOneOut):
+    """
+    
+    """
+    def __init__(self, output_holds: Union[List[int], int], index_holds: Union[List[int], List[List[int]], int] = 3, random_split: Optional[Union[float, bool]] = False, label_start_index: int = 7):
+        """
+        Args:
+            output_holds (List[int] | int): List of indices of output columns to hold out
+            index_holds (List[int] | List[List[int]] | int): List of indices of unique values to hold out
+            random_split (Optional[float | bool]): Fraction of data to hold out or whether to randomly split the data
+            label_start_index (int): Index of the first input column
+        """
+        if type(output_holds) == int:
+            output_holds = [output_holds]
+        self.output_holds = output_holds
+        
+        if type(output_holds) == list:  # Multiple column holdout
+            if type(index_holds) == int:    # Each column has the same holdout
+                self.index_holds = [index_holds] * len(output_holds)
+            elif len(index_holds) == 1:     # Each column has the same holdout
+                self.index_holds = index_holds * len(output_holds)
+            elif len(output_holds) != len(index_holds):   # Length of output_holds and index_holds must be equal
+                raise ValueError("Length of output_holds and index_holds must be equal")
+            else:   # Custom holdout for each column
+                self.index_holds = index_holds
+        else:
+            raise ValueError("output_holds must be a list")
+            
+        self.random_split = random_split
+        self.LABEL_START_INDEX = label_start_index
+
+    def split(self, data:DataFrame) -> Tuple[DataFrame, DataFrame]:
+        """
+        Splits the data into training and validation data
+
+        Args:
+            data: Data to split
+
+        Returns:
+            Tuple of train and validation data
+        """
+        y_columns = data.columns[:self.LABEL_START_INDEX]
+        if len(self.output_holds) == 1: # Single column holdout
+            if self.random_split:
+                CombineMethods.__init__(self, [HoldOneOut(y_columns[self.output_holds[0]], data[y_columns[self.output_holds[0]]].unique()[self.index_holds[0]]), RandomSplit(train_split=self.random_split)])
+                return CombineMethods.split(self, data)
+            else:
+                HoldOneOut.__init__(self, y_columns[self.output_holds[0]], data[y_columns[self.output_holds[0]]].unique()[self.index_holds[0]])
+                return HoldOneOut.split(self, data)
+        else:   # Multiple column holdout
+            val_methods = [HoldOneOut(y_columns[output_hold], data[y_columns[output_hold]].unique()[index_hold]) for output_hold, index_hold in zip(self.output_holds, self.index_holds)]
+            if self.random_split:
+                val_methods.append(RandomSplit(train_split=self.random_split))
+            CombineMethods.__init__(self, val_methods)
+            return CombineMethods.split(self, data)
